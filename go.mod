@@ -3,30 +3,32 @@ module github.com/NibiruChain/nibiru
 go 1.21
 
 require (
-	cosmossdk.io/api v0.7.0 // indirect
-	cosmossdk.io/errors v1.0.1
-	cosmossdk.io/math v1.3.0
-	cosmossdk.io/simapp v0.0.0-20230608160436-666c345ad23d
+	// Wasm
 	github.com/CosmWasm/wasmd v0.44.0
 	github.com/CosmWasm/wasmvm v1.5.0
-	github.com/MakeNowJust/heredoc/v2 v2.0.1
 	github.com/NibiruChain/collections v0.5.0
 
 	// Consenus Engine
 	github.com/cometbft/cometbft v0.37.5
 	github.com/cometbft/cometbft-db v0.11.0
 
-	// Cosmos-SDK and IBC
+	// Execution: Nibiru, Cosmos-SDK, and IBC
 	github.com/cosmos/cosmos-proto v1.0.0-beta.5
 	github.com/cosmos/cosmos-sdk v0.47.11
-	github.com/cosmos/gogoproto v1.4.10
-	github.com/cosmos/ibc-go/v7 v7.3.2
+)
 
-	// Else
-	github.com/cosmos/go-bip39 v1.0.0
+require (
+	cosmossdk.io/api v0.7.0 // indirect
+	cosmossdk.io/errors v1.0.1
+	cosmossdk.io/math v1.3.0
+	cosmossdk.io/simapp v0.0.0-20230608160436-666c345ad23d
+	github.com/MakeNowJust/heredoc/v2 v2.0.1
 	github.com/armon/go-metrics v0.4.1
 	github.com/btcsuite/btcd v0.24.0
 	github.com/btcsuite/btcd/btcutil v1.1.5
+	github.com/cosmos/go-bip39 v1.0.0
+	github.com/cosmos/gogoproto v1.4.10
+	github.com/cosmos/ibc-go/v7 v7.5.1
 	github.com/ethereum/go-ethereum v1.10.17
 	github.com/gogo/protobuf v1.3.3
 	github.com/golang/mock v1.6.0
