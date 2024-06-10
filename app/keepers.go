@@ -4,18 +4,38 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/cosmos/cosmos-sdk/client"
+	sigtypes "github.com/cosmos/cosmos-sdk/types/tx/signing"
+	authcodec "github.com/cosmos/cosmos-sdk/x/auth/codec"
+	"github.com/cosmos/cosmos-sdk/x/auth/tx"
+	txmodule "github.com/cosmos/cosmos-sdk/x/auth/tx/config"
+	ica "github.com/cosmos/ibc-go/v8/modules/apps/27-interchain-accounts"
+	icacontroller "github.com/cosmos/ibc-go/v8/modules/apps/27-interchain-accounts/controller"
+	icacontrollerkeeper "github.com/cosmos/ibc-go/v8/modules/apps/27-interchain-accounts/controller/keeper"
+	icacontrollertypes "github.com/cosmos/ibc-go/v8/modules/apps/27-interchain-accounts/controller/types"
+	icahost "github.com/cosmos/ibc-go/v8/modules/apps/27-interchain-accounts/host"
+	icahosttypes "github.com/cosmos/ibc-go/v8/modules/apps/27-interchain-accounts/host/types"
+	icatypes "github.com/cosmos/ibc-go/v8/modules/apps/27-interchain-accounts/types"
+
+	"github.com/NibiruChain/nibiru/app/appconst"
+
+	"cosmossdk.io/store/types"
+	storetypes "cosmossdk.io/store/types"
+	"cosmossdk.io/x/evidence"
+	evidencekeeper "cosmossdk.io/x/evidence/keeper"
+	evidencetypes "cosmossdk.io/x/evidence/types"
+	"cosmossdk.io/x/feegrant"
+	feegrantkeeper "cosmossdk.io/x/feegrant/keeper"
+	feegrantmodule "cosmossdk.io/x/feegrant/module"
 	wasmdapp "github.com/CosmWasm/wasmd/app"
 	"github.com/CosmWasm/wasmd/x/wasm"
 	wasmkeeper "github.com/CosmWasm/wasmd/x/wasm/keeper"
 	wasmtypes "github.com/CosmWasm/wasmd/x/wasm/types"
-	_ "github.com/cosmos/cosmos-sdk/client/docs/statik"
 	"github.com/cosmos/cosmos-sdk/client/flags"
 	"github.com/cosmos/cosmos-sdk/codec"
+	"github.com/cosmos/cosmos-sdk/runtime"
 	"github.com/cosmos/cosmos-sdk/server"
 	servertypes "github.com/cosmos/cosmos-sdk/server/types"
-	"github.com/cosmos/cosmos-sdk/store/types"
-	storetypes "github.com/cosmos/cosmos-sdk/store/types"
-	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/cosmos-sdk/types/module"
 	"github.com/cosmos/cosmos-sdk/x/auth"
 	authkeeper "github.com/cosmos/cosmos-sdk/x/auth/keeper"
@@ -29,23 +49,13 @@ import (
 	"github.com/cosmos/cosmos-sdk/x/bank"
 	bankkeeper "github.com/cosmos/cosmos-sdk/x/bank/keeper"
 	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
-	"github.com/cosmos/cosmos-sdk/x/capability"
-	capabilitykeeper "github.com/cosmos/cosmos-sdk/x/capability/keeper"
-	capabilitytypes "github.com/cosmos/cosmos-sdk/x/capability/types"
 	consensusparamkeeper "github.com/cosmos/cosmos-sdk/x/consensus/keeper"
 	consensusparamtypes "github.com/cosmos/cosmos-sdk/x/consensus/types"
-	"github.com/cosmos/cosmos-sdk/x/crisis"
 	crisiskeeper "github.com/cosmos/cosmos-sdk/x/crisis/keeper"
 	crisistypes "github.com/cosmos/cosmos-sdk/x/crisis/types"
 	distr "github.com/cosmos/cosmos-sdk/x/distribution"
 	distrkeeper "github.com/cosmos/cosmos-sdk/x/distribution/keeper"
 	distrtypes "github.com/cosmos/cosmos-sdk/x/distribution/types"
-	"github.com/cosmos/cosmos-sdk/x/evidence"
-	evidencekeeper "github.com/cosmos/cosmos-sdk/x/evidence/keeper"
-	evidencetypes "github.com/cosmos/cosmos-sdk/x/evidence/types"
-	"github.com/cosmos/cosmos-sdk/x/feegrant"
-	feegrantkeeper "github.com/cosmos/cosmos-sdk/x/feegrant/keeper"
-	feegrantmodule "github.com/cosmos/cosmos-sdk/x/feegrant/module"
 	"github.com/cosmos/cosmos-sdk/x/genutil"
 	genutiltypes "github.com/cosmos/cosmos-sdk/x/genutil/types"
 	"github.com/cosmos/cosmos-sdk/x/gov"
@@ -54,6 +64,9 @@ import (
 	govv1types "github.com/cosmos/cosmos-sdk/x/gov/types/v1"
 	govv1beta1types "github.com/cosmos/cosmos-sdk/x/gov/types/v1beta1"
 	groupmodule "github.com/cosmos/cosmos-sdk/x/group/module"
+	"github.com/cosmos/ibc-go/modules/capability"
+	capabilitykeeper "github.com/cosmos/ibc-go/modules/capability/keeper"
+	capabilitytypes "github.com/cosmos/ibc-go/modules/capability/types"
 
 	"github.com/cosmos/cosmos-sdk/x/params"
 	paramsclient "github.com/cosmos/cosmos-sdk/x/params/client"
@@ -68,60 +81,54 @@ import (
 	stakingkeeper "github.com/cosmos/cosmos-sdk/x/staking/keeper"
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 
-	"github.com/cosmos/cosmos-sdk/x/upgrade"
-	upgradeclient "github.com/cosmos/cosmos-sdk/x/upgrade/client"
-	upgradekeeper "github.com/cosmos/cosmos-sdk/x/upgrade/keeper"
-	upgradetypes "github.com/cosmos/cosmos-sdk/x/upgrade/types"
+	"cosmossdk.io/x/upgrade"
+	upgradekeeper "cosmossdk.io/x/upgrade/keeper"
+	upgradetypes "cosmossdk.io/x/upgrade/types"
 
 	// ---------------------------------------------------------------
 	// IBC imports
 
-	ibcfee "github.com/cosmos/ibc-go/v7/modules/apps/29-fee"
-	ibcfeekeeper "github.com/cosmos/ibc-go/v7/modules/apps/29-fee/keeper"
-	ibcfeetypes "github.com/cosmos/ibc-go/v7/modules/apps/29-fee/types"
-	ibctransfer "github.com/cosmos/ibc-go/v7/modules/apps/transfer"
-	ibctransferkeeper "github.com/cosmos/ibc-go/v7/modules/apps/transfer/keeper"
-	ibctransfertypes "github.com/cosmos/ibc-go/v7/modules/apps/transfer/types"
-	ibc "github.com/cosmos/ibc-go/v7/modules/core"
-	ibcclient "github.com/cosmos/ibc-go/v7/modules/core/02-client"
-	ibcclientclient "github.com/cosmos/ibc-go/v7/modules/core/02-client/client"
-	ibcclienttypes "github.com/cosmos/ibc-go/v7/modules/core/02-client/types"
-	porttypes "github.com/cosmos/ibc-go/v7/modules/core/05-port/types"
-	ibcexported "github.com/cosmos/ibc-go/v7/modules/core/exported"
-	ibckeeper "github.com/cosmos/ibc-go/v7/modules/core/keeper"
-	ibctm "github.com/cosmos/ibc-go/v7/modules/light-clients/07-tendermint"
-	ibcmock "github.com/cosmos/ibc-go/v7/testing/mock"
+	icahostkeeper "github.com/cosmos/ibc-go/v8/modules/apps/27-interchain-accounts/host/keeper"
+	ibcfee "github.com/cosmos/ibc-go/v8/modules/apps/29-fee"
+	ibcfeekeeper "github.com/cosmos/ibc-go/v8/modules/apps/29-fee/keeper"
+	ibcfeetypes "github.com/cosmos/ibc-go/v8/modules/apps/29-fee/types"
+	ibctransfer "github.com/cosmos/ibc-go/v8/modules/apps/transfer"
+	ibctransferkeeper "github.com/cosmos/ibc-go/v8/modules/apps/transfer/keeper"
+	ibctransfertypes "github.com/cosmos/ibc-go/v8/modules/apps/transfer/types"
+	ibc "github.com/cosmos/ibc-go/v8/modules/core"
+	ibcclient "github.com/cosmos/ibc-go/v8/modules/core/02-client"
+	ibcclienttypes "github.com/cosmos/ibc-go/v8/modules/core/02-client/types"
+	porttypes "github.com/cosmos/ibc-go/v8/modules/core/05-port/types"
+	ibcexported "github.com/cosmos/ibc-go/v8/modules/core/exported"
+	ibckeeper "github.com/cosmos/ibc-go/v8/modules/core/keeper"
+	ibctm "github.com/cosmos/ibc-go/v8/modules/light-clients/07-tendermint"
+	ibcmock "github.com/cosmos/ibc-go/v8/testing/mock"
 	"github.com/spf13/cast"
-
 	// ---------------------------------------------------------------
 	// Nibiru Custom Modules
-
-	"github.com/NibiruChain/nibiru/x/common"
-	"github.com/NibiruChain/nibiru/x/devgas/v1"
-	devgaskeeper "github.com/NibiruChain/nibiru/x/devgas/v1/keeper"
-	devgastypes "github.com/NibiruChain/nibiru/x/devgas/v1/types"
-	"github.com/NibiruChain/nibiru/x/epochs"
-	epochskeeper "github.com/NibiruChain/nibiru/x/epochs/keeper"
-	epochstypes "github.com/NibiruChain/nibiru/x/epochs/types"
-	"github.com/NibiruChain/nibiru/x/genmsg"
-	"github.com/NibiruChain/nibiru/x/inflation"
-	inflationkeeper "github.com/NibiruChain/nibiru/x/inflation/keeper"
-	inflationtypes "github.com/NibiruChain/nibiru/x/inflation/types"
-	oracle "github.com/NibiruChain/nibiru/x/oracle"
-	oraclekeeper "github.com/NibiruChain/nibiru/x/oracle/keeper"
-	oracletypes "github.com/NibiruChain/nibiru/x/oracle/types"
-
-	"github.com/NibiruChain/nibiru/x/spot"
-	spotkeeper "github.com/NibiruChain/nibiru/x/spot/keeper"
-	spottypes "github.com/NibiruChain/nibiru/x/spot/types"
-
-	"github.com/NibiruChain/nibiru/x/sudo"
-	"github.com/NibiruChain/nibiru/x/sudo/keeper"
-	sudotypes "github.com/NibiruChain/nibiru/x/sudo/types"
-
-	tokenfactory "github.com/NibiruChain/nibiru/x/tokenfactory"
-	tokenfactorykeeper "github.com/NibiruChain/nibiru/x/tokenfactory/keeper"
-	tokenfactorytypes "github.com/NibiruChain/nibiru/x/tokenfactory/types"
+	// "github.com/NibiruChain/nibiru/x/common"
+	// "github.com/NibiruChain/nibiru/x/devgas/v1"
+	// devgaskeeper "github.com/NibiruChain/nibiru/x/devgas/v1/keeper"
+	// devgastypes "github.com/NibiruChain/nibiru/x/devgas/v1/types"
+	// "github.com/NibiruChain/nibiru/x/epochs"
+	// epochskeeper "github.com/NibiruChain/nibiru/x/epochs/keeper"
+	// epochstypes "github.com/NibiruChain/nibiru/x/epochs/types"
+	// "github.com/NibiruChain/nibiru/x/evm"
+	// "github.com/NibiruChain/nibiru/x/evm/evmmodule"
+	// evmkeeper "github.com/NibiruChain/nibiru/x/evm/keeper"
+	// "github.com/NibiruChain/nibiru/x/genmsg"
+	// "github.com/NibiruChain/nibiru/x/inflation"
+	// inflationkeeper "github.com/NibiruChain/nibiru/x/inflation/keeper"
+	// inflationtypes "github.com/NibiruChain/nibiru/x/inflation/types"
+	// oracle "github.com/NibiruChain/nibiru/x/oracle"
+	// oraclekeeper "github.com/NibiruChain/nibiru/x/oracle/keeper"
+	// oracletypes "github.com/NibiruChain/nibiru/x/oracle/types"
+	// "github.com/NibiruChain/nibiru/x/sudo"
+	// "github.com/NibiruChain/nibiru/x/sudo/keeper"
+	// sudotypes "github.com/NibiruChain/nibiru/x/sudo/types"
+	// tokenfactory "github.com/NibiruChain/nibiru/x/tokenfactory"
+	// tokenfactorykeeper "github.com/NibiruChain/nibiru/x/tokenfactory/keeper"
+	// tokenfactorytypes "github.com/NibiruChain/nibiru/x/tokenfactory/types"
 )
 
 type AppKeepers struct {
@@ -135,8 +142,8 @@ type AppKeepers struct {
 	/* DistrKeeper is the keeper of the distribution store */
 	DistrKeeper           distrkeeper.Keeper
 	GovKeeper             govkeeper.Keeper
-	crisisKeeper          crisiskeeper.Keeper
-	upgradeKeeper         upgradekeeper.Keeper
+	crisisKeeper          *crisiskeeper.Keeper
+	upgradeKeeper         *upgradekeeper.Keeper
 	paramsKeeper          paramskeeper.Keeper
 	authzKeeper           authzkeeper.Keeper
 	FeeGrantKeeper        feegrantkeeper.Keeper
@@ -155,11 +162,15 @@ type AppKeepers struct {
 	ibcKeeper    *ibckeeper.Keeper
 	ibcFeeKeeper ibcfeekeeper.Keeper
 	/* ibcTransferKeeper is for cross-chain fungible token transfers. */
-	ibcTransferKeeper ibctransferkeeper.Keeper
+	ibcTransferKeeper   ibctransferkeeper.Keeper
+	icaControllerKeeper icacontrollerkeeper.Keeper
+	icaHostKeeper       icahostkeeper.Keeper
 
 	// make scoped keepers public for test purposes
-	ScopedIBCKeeper      capabilitykeeper.ScopedKeeper
-	ScopedTransferKeeper capabilitykeeper.ScopedKeeper
+	ScopedIBCKeeper           capabilitykeeper.ScopedKeeper
+	ScopedICAControllerKeeper capabilitykeeper.ScopedKeeper
+	ScopedICAHostKeeper       capabilitykeeper.ScopedKeeper
+	ScopedTransferKeeper      capabilitykeeper.ScopedKeeper
 
 	// make IBC modules public for test purposes
 	// these modules are never directly routed to by the IBC Router
@@ -168,13 +179,13 @@ type AppKeepers struct {
 	// ---------------
 	// Nibiru keepers
 	// ---------------
-	EpochsKeeper       epochskeeper.Keeper
-	SpotKeeper         spotkeeper.Keeper
-	OracleKeeper       oraclekeeper.Keeper
-	InflationKeeper    inflationkeeper.Keeper
-	SudoKeeper         keeper.Keeper
-	DevGasKeeper       devgaskeeper.Keeper
-	TokenFactoryKeeper tokenfactorykeeper.Keeper
+	// EpochsKeeper       epochskeeper.Keeper
+	// OracleKeeper       oraclekeeper.Keeper
+	// InflationKeeper    inflationkeeper.Keeper
+	// SudoKeeper         keeper.Keeper
+	// DevGasKeeper       devgaskeeper.Keeper
+	// TokenFactoryKeeper tokenfactorykeeper.Keeper
+	// EvmKeeper          evmkeeper.Keeper
 
 	// WASM keepers
 	WasmKeeper       wasmkeeper.Keeper
@@ -186,7 +197,7 @@ func initStoreKeys() (
 	tkeys map[string]*types.TransientStoreKey,
 	memKeys map[string]*types.MemoryStoreKey,
 ) {
-	keys = sdk.NewKVStoreKeys(
+	keys = storetypes.NewKVStoreKeys(
 		authtypes.StoreKey,
 		banktypes.StoreKey,
 		stakingtypes.StoreKey,
@@ -206,19 +217,22 @@ func initStoreKeys() (
 		ibctransfertypes.StoreKey,
 		ibcfeetypes.StoreKey,
 		ibcexported.StoreKey,
+		icahosttypes.StoreKey,
+		icacontrollertypes.StoreKey,
 
 		// nibiru x/ keys
-		spottypes.StoreKey,
-		oracletypes.StoreKey,
-		epochstypes.StoreKey,
-		inflationtypes.StoreKey,
-		sudotypes.StoreKey,
+		// oracletypes.StoreKey,
+		// epochstypes.StoreKey,
+		// inflationtypes.StoreKey,
+		// sudotypes.StoreKey,
 		wasmtypes.StoreKey,
-		devgastypes.StoreKey,
-		tokenfactorytypes.StoreKey,
+		// devgastypes.StoreKey,
+		// tokenfactorytypes.StoreKey,
+
+		// evm.StoreKey,
 	)
-	tkeys = sdk.NewTransientStoreKeys(paramstypes.TStoreKey)
-	memKeys = sdk.NewMemoryStoreKeys(capabilitytypes.MemStoreKey)
+	tkeys = storetypes.NewTransientStoreKeys(paramstypes.TStoreKey)
+	memKeys = storetypes.NewMemoryStoreKeys(capabilitytypes.MemStoreKey)
 	return keys, tkeys, memKeys
 }
 
@@ -240,8 +254,13 @@ func (app *NibiruApp) InitKeepers(
 	)
 
 	// set the BaseApp's parameter store
-	app.ConsensusParamsKeeper = consensusparamkeeper.NewKeeper(appCodec, keys[consensusparamtypes.StoreKey], govModuleAddr)
-	bApp.SetParamStore(&app.ConsensusParamsKeeper)
+	app.ConsensusParamsKeeper = consensusparamkeeper.NewKeeper(
+		appCodec,
+		runtime.NewKVStoreService(keys[consensusparamtypes.StoreKey]),
+		govModuleAddr,
+		runtime.EventService{},
+	)
+	bApp.SetParamStore(app.ConsensusParamsKeeper.ParamsStore)
 
 	/* Add capabilityKeeper and ScopeToModule for the ibc module
 	   This allows authentication of object-capability permissions for each of
@@ -253,6 +272,8 @@ func (app *NibiruApp) InitKeepers(
 		memKeys[capabilitytypes.MemStoreKey],
 	)
 	app.ScopedIBCKeeper = app.capabilityKeeper.ScopeToModule(ibcexported.ModuleName)
+	app.ScopedICAControllerKeeper = app.capabilityKeeper.ScopeToModule(icacontrollertypes.SubModuleName)
+	app.ScopedICAHostKeeper = app.capabilityKeeper.ScopeToModule(icahosttypes.SubModuleName)
 	// scopedFeeMockKeeper := app.capabilityKeeper.ScopeToModule(MockFeePort)
 	app.ScopedTransferKeeper = app.capabilityKeeper.ScopeToModule(ibctransfertypes.ModuleName)
 
@@ -263,32 +284,57 @@ func (app *NibiruApp) InitKeepers(
 	// seal capability keeper after scoping modules
 	// app.capabilityKeeper.Seal()
 
-	// add keepers
+	// TODO: chore(upgrade): Potential breaking change on AccountKeeper dur
+	// to ProtoBaseAccount replacement.
 	app.AccountKeeper = authkeeper.NewAccountKeeper(
 		appCodec,
-		keys[authtypes.StoreKey],
+		runtime.NewKVStoreService(keys[authtypes.StoreKey]),
 		authtypes.ProtoBaseAccount,
 		maccPerms,
-		sdk.GetConfig().GetBech32AccountAddrPrefix(),
+		authcodec.NewBech32Codec(appconst.AccountAddressPrefix),
+		appconst.AccountAddressPrefix,
 		govModuleAddr,
 	)
+
 	app.BankKeeper = bankkeeper.NewBaseKeeper(
 		appCodec,
-		keys[banktypes.StoreKey],
+		runtime.NewKVStoreService(keys[banktypes.StoreKey]),
 		app.AccountKeeper,
 		BlockedAddresses(),
 		govModuleAddr,
+		app.Logger().With("module", "x/bank"),
 	)
+
+	// optional: enable sign mode textual by overwriting the default tx config (after setting the bank keeper)
+	enabledSignModes := append(tx.DefaultSignModes, sigtypes.SignMode_SIGN_MODE_TEXTUAL)
+	txConfigOpts := tx.ConfigOptions{
+		EnabledSignModes:           enabledSignModes,
+		TextualCoinMetadataQueryFn: txmodule.NewBankKeeperCoinMetadataQueryFn(app.BankKeeper),
+	}
+	txConfig, err := tx.NewTxConfigWithOptions(
+		appCodec,
+		txConfigOpts,
+	)
+	if err != nil {
+		panic(err)
+	}
+	app.txConfig = txConfig
+
+	validatorAddressPrefix := appconst.AccountAddressPrefix + "valoper"
+	consNodeAddressPrefix := appconst.AccountAddressPrefix + "valcons"
 	app.stakingKeeper = stakingkeeper.NewKeeper(
 		appCodec,
-		keys[stakingtypes.StoreKey],
+		runtime.NewKVStoreService(keys[stakingtypes.StoreKey]),
 		app.AccountKeeper,
 		app.BankKeeper,
 		govModuleAddr,
+		authcodec.NewBech32Codec(validatorAddressPrefix),
+		authcodec.NewBech32Codec(consNodeAddressPrefix),
 	)
+
 	app.DistrKeeper = distrkeeper.NewKeeper(
 		appCodec,
-		keys[distrtypes.StoreKey],
+		runtime.NewKVStoreService(keys[distrtypes.StoreKey]),
 		app.AccountKeeper,
 		app.BankKeeper,
 		app.stakingKeeper,
@@ -297,16 +343,21 @@ func (app *NibiruApp) InitKeepers(
 	)
 
 	invCheckPeriod := cast.ToUint(appOpts.Get(server.FlagInvCheckPeriod))
-	app.crisisKeeper = *crisiskeeper.NewKeeper(
+	app.crisisKeeper = crisiskeeper.NewKeeper(
 		appCodec,
-		keys[crisistypes.StoreKey],
+		runtime.NewKVStoreService(keys[crisistypes.StoreKey]),
 		invCheckPeriod,
 		app.BankKeeper,
 		authtypes.FeeCollectorName,
 		govModuleAddr,
+		app.AccountKeeper.AddressCodec(),
 	)
 
-	app.FeeGrantKeeper = feegrantkeeper.NewKeeper(appCodec, keys[feegrant.StoreKey], app.AccountKeeper)
+	app.FeeGrantKeeper = feegrantkeeper.NewKeeper(
+		appCodec,
+		runtime.NewKVStoreService(keys[feegrant.StoreKey]),
+		app.AccountKeeper,
+	)
 
 	// get skipUpgradeHeights from the app options
 	skipUpgradeHeights := map[int64]bool{}
@@ -316,9 +367,9 @@ func (app *NibiruApp) InitKeepers(
 	homePath := cast.ToString(appOpts.Get(flags.FlagHome))
 
 	/*upgradeKeeper must be created before ibcKeeper. */
-	app.upgradeKeeper = *upgradekeeper.NewKeeper(
+	app.upgradeKeeper = upgradekeeper.NewKeeper(
 		skipUpgradeHeights,
-		keys[upgradetypes.StoreKey],
+		runtime.NewKVStoreService(keys[upgradetypes.StoreKey]),
 		appCodec,
 		homePath,
 		app.BaseApp,
@@ -330,7 +381,7 @@ func (app *NibiruApp) InitKeepers(
 	app.slashingKeeper = slashingkeeper.NewKeeper(
 		appCodec,
 		legacyAmino,
-		keys[slashingtypes.StoreKey],
+		runtime.NewKVStoreService(keys[slashingtypes.StoreKey]),
 		app.stakingKeeper,
 		govModuleAddr,
 	)
@@ -340,7 +391,7 @@ func (app *NibiruApp) InitKeepers(
 	)
 
 	app.authzKeeper = authzkeeper.NewKeeper(
-		keys[authzkeeper.StoreKey],
+		runtime.NewKVStoreService(keys[authzkeeper.StoreKey]),
 		appCodec,
 		app.BaseApp.MsgServiceRouter(),
 		app.AccountKeeper,
@@ -348,35 +399,40 @@ func (app *NibiruApp) InitKeepers(
 
 	// ---------------------------------- Nibiru Chain x/ keepers
 
-	app.SpotKeeper = spotkeeper.NewKeeper(
-		appCodec, keys[spottypes.StoreKey], app.GetSubspace(spottypes.ModuleName),
-		app.AccountKeeper, app.BankKeeper, app.DistrKeeper)
+	// app.SudoKeeper = keeper.NewKeeper(
+	// 	appCodec, keys[sudotypes.StoreKey],
+	// )
 
-	app.SudoKeeper = keeper.NewKeeper(
-		appCodec, keys[sudotypes.StoreKey],
-	)
+	// app.OracleKeeper = oraclekeeper.NewKeeper(appCodec, keys[oracletypes.StoreKey],
+	// 	app.AccountKeeper, app.BankKeeper, app.DistrKeeper, app.stakingKeeper, app.slashingKeeper,
+	// 	app.SudoKeeper,
+	// 	distrtypes.ModuleName,
+	// )
 
-	app.OracleKeeper = oraclekeeper.NewKeeper(appCodec, keys[oracletypes.StoreKey],
-		app.AccountKeeper, app.BankKeeper, app.DistrKeeper, app.stakingKeeper,
-		app.SudoKeeper,
-		distrtypes.ModuleName,
-	)
+	// app.EpochsKeeper = epochskeeper.NewKeeper(
+	// 	appCodec, keys[epochstypes.StoreKey],
+	// )
 
-	app.EpochsKeeper = epochskeeper.NewKeeper(
-		appCodec, keys[epochstypes.StoreKey],
-	)
+	// app.InflationKeeper = inflationkeeper.NewKeeper(
+	// 	appCodec, keys[inflationtypes.StoreKey], app.GetSubspace(inflationtypes.ModuleName),
+	// 	app.AccountKeeper, app.BankKeeper, app.DistrKeeper, app.stakingKeeper, app.SudoKeeper, authtypes.FeeCollectorName,
+	// )
 
-	app.InflationKeeper = inflationkeeper.NewKeeper(
-		appCodec, keys[inflationtypes.StoreKey], app.GetSubspace(inflationtypes.ModuleName),
-		app.AccountKeeper, app.BankKeeper, app.DistrKeeper, app.stakingKeeper, app.SudoKeeper, authtypes.FeeCollectorName,
-	)
+	// app.EpochsKeeper.SetHooks(
+	// 	epochstypes.NewMultiEpochHooks(
+	// 		app.InflationKeeper.Hooks(),
+	// 		app.OracleKeeper.Hooks(),
+	// 	),
+	// )
 
-	app.EpochsKeeper.SetHooks(
-		epochstypes.NewMultiEpochHooks(
-			app.InflationKeeper.Hooks(),
-			app.OracleKeeper.Hooks(),
-		),
-	)
+	// app.EvmKeeper = evmkeeper.NewKeeper(
+	// 	appCodec,
+	// 	keys[evm.StoreKey],
+	// 	tkeys[evm.TransientKey],
+	// 	authtypes.NewModuleAddress(govtypes.ModuleName),
+	// 	app.AccountKeeper,
+	// 	app.BankKeeper,
+	// )
 
 	// ---------------------------------- IBC keepers
 
@@ -387,6 +443,7 @@ func (app *NibiruApp) InitKeepers(
 		app.stakingKeeper,
 		app.upgradeKeeper,
 		app.ScopedIBCKeeper,
+		govModuleAddr,
 	)
 
 	// IBC Fee Module keeper
@@ -394,7 +451,7 @@ func (app *NibiruApp) InitKeepers(
 		appCodec, keys[ibcfeetypes.StoreKey],
 		app.ibcKeeper.ChannelKeeper, // may be replaced with IBC middleware
 		app.ibcKeeper.ChannelKeeper,
-		&app.ibcKeeper.PortKeeper,
+		app.ibcKeeper.PortKeeper,
 		app.AccountKeeper,
 		app.BankKeeper,
 	)
@@ -405,16 +462,41 @@ func (app *NibiruApp) InitKeepers(
 		/* paramSubspace */ app.GetSubspace(ibctransfertypes.ModuleName),
 		/* ibctransfertypes.ICS4Wrapper */ app.ibcFeeKeeper,
 		/* ibctransfertypes.ChannelKeeper */ app.ibcKeeper.ChannelKeeper,
-		/* ibctransfertypes.PortKeeper */ &app.ibcKeeper.PortKeeper,
+		/* ibctransfertypes.PortKeeper */ app.ibcKeeper.PortKeeper,
 		app.AccountKeeper,
 		app.BankKeeper,
 		app.ScopedTransferKeeper,
+		govModuleAddr,
+	)
+
+	app.icaControllerKeeper = icacontrollerkeeper.NewKeeper(
+		appCodec, keys[icacontrollertypes.StoreKey],
+		app.GetSubspace(icacontrollertypes.SubModuleName),
+		app.ibcFeeKeeper,
+		app.ibcKeeper.ChannelKeeper,
+		app.ibcKeeper.PortKeeper,
+		app.ScopedICAControllerKeeper,
+		app.MsgServiceRouter(),
+		govModuleAddr,
+	)
+
+	app.icaHostKeeper = icahostkeeper.NewKeeper(
+		appCodec,
+		keys[icahosttypes.StoreKey],
+		app.GetSubspace(icahosttypes.SubModuleName),
+		app.ibcFeeKeeper,
+		app.ibcKeeper.ChannelKeeper,
+		app.ibcKeeper.PortKeeper,
+		app.AccountKeeper,
+		app.ScopedICAHostKeeper,
+		app.MsgServiceRouter(),
+		govModuleAddr,
 	)
 
 	app.ScopedWasmKeeper = app.capabilityKeeper.ScopeToModule(wasmtypes.ModuleName)
 
 	wasmDir := filepath.Join(homePath, "data")
-	wasmConfig, err := wasm.ReadWasmConfig(appOpts)
+	wasmConfig, err = wasm.ReadWasmConfig(appOpts)
 	if err != nil {
 		panic("error while reading wasm config: " + err.Error())
 	}
@@ -430,14 +512,14 @@ func (app *NibiruApp) InitKeepers(
 	supportedFeatures := strings.Join(wasmdapp.AllCapabilities(), ",")
 	app.WasmKeeper = wasmkeeper.NewKeeper(
 		appCodec,
-		keys[wasmtypes.StoreKey],
+		runtime.NewKVStoreService(keys[wasmtypes.StoreKey]),
 		app.AccountKeeper,
 		app.BankKeeper,
 		app.stakingKeeper,
 		distrkeeper.NewQuerier(app.DistrKeeper),
 		app.ibcFeeKeeper, // ISC4 Wrapper: fee IBC middleware
 		app.ibcKeeper.ChannelKeeper,
-		&app.ibcKeeper.PortKeeper,
+		app.ibcKeeper.PortKeeper,
 		app.ScopedWasmKeeper,
 		app.ibcTransferKeeper,
 		app.MsgServiceRouter(),
@@ -449,33 +531,37 @@ func (app *NibiruApp) InitKeepers(
 		GetWasmOpts(*app, appOpts)...,
 	)
 
-	// DevGas uses WasmKeeper
-	app.DevGasKeeper = devgaskeeper.NewKeeper(
-		keys[devgastypes.StoreKey],
-		appCodec,
-		app.BankKeeper,
-		app.WasmKeeper,
-		app.AccountKeeper,
-		authtypes.FeeCollectorName,
-		govModuleAddr,
-	)
+	// // DevGas uses WasmKeeper
+	// app.DevGasKeeper = devgaskeeper.NewKeeper(
+	// 	keys[devgastypes.StoreKey],
+	// 	appCodec,
+	// 	app.BankKeeper,
+	// 	app.WasmKeeper,
+	// 	app.AccountKeeper,
+	// 	authtypes.FeeCollectorName,
+	// 	govModuleAddr,
+	// )
 
-	app.TokenFactoryKeeper = tokenfactorykeeper.NewKeeper(
-		keys[tokenfactorytypes.StoreKey],
-		appCodec,
-		app.BankKeeper,
-		app.AccountKeeper,
-		app.DistrKeeper,
-		govModuleAddr,
-	)
+	// app.TokenFactoryKeeper = tokenfactorykeeper.NewKeeper(
+	// 	keys[tokenfactorytypes.StoreKey],
+	// 	appCodec,
+	// 	app.BankKeeper,
+	// 	app.AccountKeeper,
+	// 	app.DistrKeeper,
+	// 	govModuleAddr,
+	// )
 
 	// register the proposal types
 
 	// Create evidence keeper.
 	// This keeper automatically includes an evidence router.
 	app.evidenceKeeper = *evidencekeeper.NewKeeper(
-		appCodec, keys[evidencetypes.StoreKey], app.stakingKeeper,
+		appCodec,
+		runtime.NewKVStoreService(keys[evidencetypes.StoreKey]),
+		app.stakingKeeper,
 		app.slashingKeeper,
+		app.AccountKeeper.AddressCodec(),
+		runtime.ProvideCometInfoService(),
 	)
 
 	// Mock Module setup for testing IBC and also acts as the interchain accounts authentication module
@@ -501,8 +587,24 @@ func (app *NibiruApp) InitKeepers(
 	transferStack = ibctransfer.NewIBCModule(app.ibcTransferKeeper)
 	transferStack = ibcfee.NewIBCMiddleware(transferStack, app.ibcFeeKeeper)
 
+	// Create Interchain Accounts Stack
+	// SendPacket, since it is originating from the application to core IBC:
+	// icaAuthModuleKeeper.SendTx -> icaController.SendPacket -> channel.SendPacket
+	var icaControllerStack porttypes.IBCModule
+	// integration point for custom authentication modules
+	// see https://medium.com/the-interchain-foundation/ibc-go-v6-changes-to-interchain-accounts-and-how-it-impacts-your-chain-806c185300d7
+	var noAuthzModule porttypes.IBCModule
+	icaControllerStack = icacontroller.NewIBCMiddleware(noAuthzModule, app.icaControllerKeeper)
+
+	// RecvPacket, message that originates from core IBC and goes down to app, the flow is:
+	// channel.RecvPacket -> fee.OnRecvPacket -> icaHost.OnRecvPacket
+	icaHostStack := icahost.NewIBCModule(app.icaHostKeeper)
+
 	// Add transfer stack to IBC Router
-	ibcRouter.AddRoute(ibctransfertypes.ModuleName, transferStack)
+	ibcRouter.
+		AddRoute(icahosttypes.SubModuleName, icaHostStack).
+		AddRoute(icacontrollertypes.SubModuleName, icaControllerStack).
+		AddRoute(ibctransfertypes.ModuleName, transferStack)
 
 	// Create Mock IBC Fee module stack for testing
 	// SendPacket, since it is originating from the application to core IBC:
@@ -528,21 +630,22 @@ func (app *NibiruApp) InitKeepers(
 	govRouter.
 		AddRoute(govtypes.RouterKey, govv1beta1types.ProposalHandler).
 		AddRoute(paramproposal.RouterKey, params.NewParamChangeProposalHandler(app.paramsKeeper)).
-		// AddRoute(distrtypes.RouterKey, distr.NewCommunityPoolSpendProposalHandler(app.DistrKeeper)).
-		AddRoute(upgradetypes.RouterKey, upgrade.NewSoftwareUpgradeProposalHandler(&app.upgradeKeeper)).
+		// AddRoute(upgradetypes.RouterKey, upgrade.NewSoftwareUpgradeProposalHandler(&app.upgradeKeeper)).
 		AddRoute(ibcclienttypes.RouterKey, ibcclient.NewClientProposalHandler(app.ibcKeeper.ClientKeeper))
 
 	govConfig := govtypes.DefaultConfig()
 	govKeeper := govkeeper.NewKeeper(
 		appCodec,
-		keys[govtypes.StoreKey],
+		runtime.NewKVStoreService(keys[govtypes.StoreKey]),
 		app.AccountKeeper,
 		app.BankKeeper,
 		app.stakingKeeper,
+		app.DistrKeeper,
 		app.MsgServiceRouter(),
 		govConfig,
-		govModuleAddr,
+		authtypes.NewModuleAddress(govtypes.ModuleName).String(),
 	)
+
 	govKeeper.SetLegacyRouter(govRouter)
 
 	app.GovKeeper = *govKeeper.SetHooks(
@@ -555,14 +658,15 @@ func (app *NibiruApp) InitKeepers(
 func (app *NibiruApp) initAppModules(
 	encodingConfig EncodingConfig,
 	skipGenesisInvariants bool,
+	txConfig client.TxConfig,
 ) []module.AppModule {
 	appCodec := app.appCodec
 
 	return []module.AppModule{
 		// core modules
 		genutil.NewAppModule(
-			app.AccountKeeper, app.stakingKeeper, app.BaseApp.DeliverTx,
-			encodingConfig.TxConfig,
+			app.AccountKeeper, app.stakingKeeper, app,
+			txConfig,
 		),
 		auth.NewAppModule(appCodec, app.AccountKeeper, authsims.RandomGenesisAccounts, app.GetSubspace(authtypes.ModuleName)),
 		vesting.NewAppModule(app.AccountKeeper, app.BankKeeper),
@@ -570,40 +674,48 @@ func (app *NibiruApp) initAppModules(
 		capability.NewAppModule(appCodec, *app.capabilityKeeper, false),
 		feegrantmodule.NewAppModule(appCodec, app.AccountKeeper, app.BankKeeper, app.FeeGrantKeeper, app.interfaceRegistry),
 		gov.NewAppModule(appCodec, &app.GovKeeper, app.AccountKeeper, app.BankKeeper, app.GetSubspace(govtypes.ModuleName)),
-		slashing.NewAppModule(appCodec, app.slashingKeeper, app.AccountKeeper, app.BankKeeper, app.stakingKeeper, app.GetSubspace(slashingtypes.ModuleName)),
+		slashing.NewAppModule(appCodec, app.slashingKeeper, app.AccountKeeper, app.BankKeeper, app.stakingKeeper, app.GetSubspace(slashingtypes.ModuleName), app.interfaceRegistry),
 		distr.NewAppModule(appCodec, app.DistrKeeper, app.AccountKeeper, app.BankKeeper, app.stakingKeeper, app.GetSubspace(distrtypes.ModuleName)),
 		staking.NewAppModule(appCodec, app.stakingKeeper, app.AccountKeeper, app.BankKeeper, app.GetSubspace(stakingtypes.ModuleName)),
-		upgrade.NewAppModule(&app.upgradeKeeper),
+		upgrade.NewAppModule(app.upgradeKeeper, app.AccountKeeper.AddressCodec()),
 		params.NewAppModule(app.paramsKeeper),
 		authzmodule.NewAppModule(appCodec, app.authzKeeper, app.AccountKeeper, app.BankKeeper, app.interfaceRegistry),
 
 		// Nibiru modules
-		spot.NewAppModule(appCodec, app.SpotKeeper, app.AccountKeeper, app.BankKeeper),
-		oracle.NewAppModule(appCodec, app.OracleKeeper, app.AccountKeeper, app.BankKeeper),
-		epochs.NewAppModule(appCodec, app.EpochsKeeper),
-		inflation.NewAppModule(app.InflationKeeper, app.AccountKeeper, *app.stakingKeeper),
-		sudo.NewAppModule(appCodec, app.SudoKeeper),
-		genmsg.NewAppModule(app.MsgServiceRouter()),
+		// oracle.NewAppModule(appCodec, app.OracleKeeper, app.AccountKeeper, app.BankKeeper),
+		// epochs.NewAppModule(appCodec, app.EpochsKeeper),
+		// inflation.NewAppModule(app.InflationKeeper, app.AccountKeeper, *app.stakingKeeper),
+		// sudo.NewAppModule(appCodec, app.SudoKeeper),
+		// genmsg.NewAppModule(app.MsgServiceRouter()),
 
 		// ibc
 		evidence.NewAppModule(app.evidenceKeeper),
 		ibc.NewAppModule(app.ibcKeeper),
 		ibctransfer.NewAppModule(app.ibcTransferKeeper),
 		ibcfee.NewAppModule(app.ibcFeeKeeper),
+		ica.NewAppModule(&app.icaControllerKeeper, &app.icaHostKeeper),
+
+		// evmmodule.NewAppModule(&app.EvmKeeper, app.AccountKeeper),
 
 		// wasm
 		wasm.NewAppModule(
-			appCodec, &app.WasmKeeper, app.stakingKeeper, app.AccountKeeper,
-			app.BankKeeper, app.MsgServiceRouter(),
+			appCodec,
+			&app.WasmKeeper,
+			app.stakingKeeper,
+			app.AccountKeeper,
+			app.BankKeeper,
+			app.MsgServiceRouter(),
 			app.GetSubspace(wasmtypes.ModuleName)),
-		devgas.NewAppModule(
-			app.DevGasKeeper, app.AccountKeeper,
-			app.GetSubspace(devgastypes.ModuleName)),
-		tokenfactory.NewAppModule(
-			app.TokenFactoryKeeper, app.AccountKeeper,
-		),
-
-		crisis.NewAppModule(&app.crisisKeeper, skipGenesisInvariants, app.GetSubspace(crisistypes.ModuleName)), // always be last to make sure that it checks for all invariants and not only part of them
+		// devgas.NewAppModule(
+		// 	app.DevGasKeeper,app.AccountKeeper,app.GetSubspace(devgastypes.ModuleName)),
+		// 	tokenfactory.NewAppModule(
+		// 		app.TokenFactoryKeeper,
+		// 		app.AccountKeeper,
+		// 	),
+		// crisis.NewAppModule(
+		// 	app.crisisKeeper,
+		// 	skipGenesisInvariants,
+		// 	app.GetSubspace(crisistypes.ModuleName)),
 	}
 }
 
@@ -648,26 +760,29 @@ func orderedModuleNames() []string {
 
 		// --------------------------------------------------------------------
 		// Native x/ Modules
-		epochstypes.ModuleName,
-		spottypes.ModuleName,
-		oracletypes.ModuleName,
-		inflationtypes.ModuleName,
-		sudotypes.ModuleName,
+		// epochstypes.ModuleName,
+		// oracletypes.ModuleName,
+		// inflationtypes.ModuleName,
+		// sudotypes.ModuleName,
 
 		// --------------------------------------------------------------------
 		// IBC modules
 		ibctransfertypes.ModuleName,
 		ibcexported.ModuleName,
 		ibcfeetypes.ModuleName,
+		icatypes.ModuleName,
+
+		// --------------------------------------------------------------------
+		// evm.ModuleName,
 
 		// --------------------------------------------------------------------
 		// CosmWasm
 		wasmtypes.ModuleName,
-		devgastypes.ModuleName,
-		tokenfactorytypes.ModuleName,
+		// devgastypes.ModuleName,
+		// tokenfactorytypes.ModuleName,
 
-		// Should be before genmsg
-		genmsg.ModuleName,
+		// Everything else should be before genmsg
+		// genmsg.ModuleName,
 	}
 }
 
@@ -692,7 +807,7 @@ func (app *NibiruApp) initModuleManager(
 	skipGenesisInvariants bool,
 ) {
 	app.ModuleManager = module.NewManager(
-		app.initAppModules(encodingConfig, skipGenesisInvariants)...,
+		app.initAppModules(encodingConfig, skipGenesisInvariants, app.txConfig)...,
 	)
 
 	orderedModules := orderedModuleNames()
@@ -704,7 +819,7 @@ func (app *NibiruApp) initModuleManager(
 	// Uncomment if you want to set a custom migration order here.
 	// app.mm.SetOrderMigrations(custom order)
 
-	app.ModuleManager.RegisterInvariants(&app.crisisKeeper)
+	app.ModuleManager.RegisterInvariants(app.crisisKeeper)
 	app.configurator = module.NewConfigurator(
 		app.appCodec, app.MsgServiceRouter(), app.GRPCQueryRouter())
 	app.ModuleManager.RegisterServices(app.configurator)
@@ -743,10 +858,11 @@ func ModuleBasicManager() module.BasicManager {
 		distr.AppModuleBasic{},
 		NewGovModuleBasic(
 			paramsclient.ProposalHandler,
-			upgradeclient.LegacyProposalHandler,
-			upgradeclient.LegacyCancelProposalHandler,
-			ibcclientclient.UpdateClientProposalHandler,
-			ibcclientclient.UpgradeProposalHandler,
+			// upgradeclient.LegacyProposalHandler,
+			// upgradeclient.LegacyCancelProposalHandler,
+			// seems to be removed per https://github.com/cosmos/ibc-go/pull/4620
+			// ibcclientclient.UpdateClientProposalHandler,
+			// ibcclientclient.UpgradeProposalHandler,
 		),
 		params.AppModuleBasic{},
 		CrisisModule{},
@@ -761,38 +877,40 @@ func ModuleBasicManager() module.BasicManager {
 		ibc.AppModuleBasic{},
 		ibctransfer.AppModuleBasic{},
 		ibctm.AppModuleBasic{},
+		ica.AppModuleBasic{},
 		// native x/
-		spot.AppModuleBasic{},
-		oracle.AppModuleBasic{},
-		epochs.AppModuleBasic{},
-		inflation.AppModuleBasic{},
-		sudo.AppModuleBasic{},
+		// evmmodule.AppModuleBasic{},
+		// oracle.AppModuleBasic{},
+		// epochs.AppModuleBasic{},
+		// inflation.AppModuleBasic{},
+		// sudo.AppModuleBasic{},
 		wasm.AppModuleBasic{},
-		devgas.AppModuleBasic{},
-		tokenfactory.AppModuleBasic{},
+		// devgas.AppModuleBasic{},
+		// tokenfactory.AppModuleBasic{},
 		ibcfee.AppModuleBasic{},
-		genmsg.AppModule{},
+		// genmsg.AppModule{},
 	)
 }
 
 func ModuleAccPerms() map[string][]string {
 	return map[string][]string{
-		authtypes.FeeCollectorName:     nil,
-		distrtypes.ModuleName:          nil,
-		inflationtypes.ModuleName:      {authtypes.Minter, authtypes.Burner},
+		authtypes.FeeCollectorName: nil,
+		distrtypes.ModuleName:      nil,
+		// inflationtypes.ModuleName:      {authtypes.Minter, authtypes.Burner},
 		stakingtypes.BondedPoolName:    {authtypes.Burner, authtypes.Staking},
 		stakingtypes.NotBondedPoolName: {authtypes.Burner, authtypes.Staking},
 		govtypes.ModuleName:            {authtypes.Burner},
-		spottypes.ModuleName:           {authtypes.Minter, authtypes.Burner},
-		oracletypes.ModuleName:         {},
-		ibctransfertypes.ModuleName:    {authtypes.Minter, authtypes.Burner},
-		ibcfeetypes.ModuleName:         {},
+		// oracletypes.ModuleName:         {},
+		ibctransfertypes.ModuleName: {authtypes.Minter, authtypes.Burner},
+		ibcfeetypes.ModuleName:      {},
+		icatypes.ModuleName:         {},
 
-		epochstypes.ModuleName:           {},
-		sudotypes.ModuleName:             {},
-		common.TreasuryPoolModuleAccount: {},
-		wasmtypes.ModuleName:             {authtypes.Burner},
-		tokenfactorytypes.ModuleName:     {authtypes.Minter, authtypes.Burner},
+		// evm.ModuleName:                   {authtypes.Minter, authtypes.Burner},
+		// epochstypes.ModuleName:           {},
+		// sudotypes.ModuleName:             {},
+		// common.TreasuryPoolModuleAccount: {},
+		wasmtypes.ModuleName: {authtypes.Burner},
+		// tokenfactorytypes.ModuleName:     {authtypes.Minter, authtypes.Burner},
 	}
 }
 
@@ -810,16 +928,17 @@ func initParamsKeeper(
 	paramsKeeper.Subspace(govtypes.ModuleName)
 	paramsKeeper.Subspace(crisistypes.ModuleName)
 	// Nibiru core params keepers | x/
-	paramsKeeper.Subspace(spottypes.ModuleName)
-	paramsKeeper.Subspace(epochstypes.ModuleName)
-	paramsKeeper.Subspace(inflationtypes.ModuleName)
+	// paramsKeeper.Subspace(epochstypes.ModuleName)
+	// paramsKeeper.Subspace(inflationtypes.ModuleName)
 	// ibc params keepers
 	paramsKeeper.Subspace(ibctransfertypes.ModuleName)
 	paramsKeeper.Subspace(ibcexported.ModuleName)
 	paramsKeeper.Subspace(ibcfeetypes.ModuleName)
+	paramsKeeper.Subspace(icacontrollertypes.SubModuleName)
+	paramsKeeper.Subspace(icahosttypes.SubModuleName)
 	// wasm params keepers
 	paramsKeeper.Subspace(wasmtypes.ModuleName)
-	paramsKeeper.Subspace(devgastypes.ModuleName)
+	// paramsKeeper.Subspace(devgastypes.ModuleName)
 
 	return paramsKeeper
 }

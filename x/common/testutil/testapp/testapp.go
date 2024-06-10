@@ -2,24 +2,25 @@ package testapp
 
 import (
 	"encoding/json"
+
 	"time"
 
-	tmdb "github.com/cometbft/cometbft-db"
+	ibctransfertypes "github.com/cosmos/ibc-go/v8/modules/apps/transfer/types"
+
+	"cosmossdk.io/log"
 	abci "github.com/cometbft/cometbft/abci/types"
-	"github.com/cometbft/cometbft/libs/log"
-	tmproto "github.com/cometbft/cometbft/proto/tendermint/types"
+	tmdb "github.com/cosmos/cosmos-db"
 	"github.com/cosmos/cosmos-sdk/baseapp"
 	"github.com/cosmos/cosmos-sdk/testutil/sims"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	bankkeeper "github.com/cosmos/cosmos-sdk/x/bank/keeper"
 
 	"github.com/NibiruChain/nibiru/app"
-	"github.com/NibiruChain/nibiru/x/common/asset"
-	"github.com/NibiruChain/nibiru/x/common/denoms"
+	"github.com/NibiruChain/nibiru/app/appconst"
 	"github.com/NibiruChain/nibiru/x/common/testutil"
-	epochstypes "github.com/NibiruChain/nibiru/x/epochs/types"
-	inflationtypes "github.com/NibiruChain/nibiru/x/inflation/types"
-	sudotypes "github.com/NibiruChain/nibiru/x/sudo/types"
+	// epochstypes "github.com/NibiruChain/nibiru/x/epochs/types"
+	// inflationtypes "github.com/NibiruChain/nibiru/x/inflation/types"
+	// sudotypes "github.com/NibiruChain/nibiru/x/sudo/types"
 )
 
 func init() {
@@ -34,46 +35,43 @@ func NewNibiruTestAppAndContext() (*app.NibiruApp, sdk.Context) {
 
 	// Set up base app
 	encoding := app.MakeEncodingConfig()
-	var appGenesis app.GenesisState = app.NewDefaultGenesisState(encoding.Marshaler)
-	genModEpochs := epochstypes.DefaultGenesisFromTime(time.Now().UTC())
+	var appGenesis app.GenesisState = app.NewDefaultGenesisState(encoding.Codec)
+	// genModEpochs := epochstypes.DefaultGenesisFromTime(time.Now().UTC())
 
-	// Set happy genesis: epochs
-	appGenesis[epochstypes.ModuleName] = encoding.Marshaler.MustMarshalJSON(
-		genModEpochs,
-	)
+	// // Set happy genesis: epochs
+	// appGenesis[epochstypes.ModuleName] = encoding.Codec.MustMarshalJSON(
+	// 	genModEpochs,
+	// )
 
 	// Set happy genesis: sudo
-	sudoGenesis := new(sudotypes.GenesisState)
-	sudoGenesis.Sudoers = DefaultSudoers()
-	appGenesis[sudotypes.ModuleName] = encoding.Marshaler.MustMarshalJSON(sudoGenesis)
+	// sudoGenesis := new(sudotypes.GenesisState)
+	// sudoGenesis.Sudoers = DefaultSudoers()
+	// appGenesis[sudotypes.ModuleName] = encoding.Codec.MustMarshalJSON(sudoGenesis)
 
 	app := NewNibiruTestApp(appGenesis)
 	ctx := NewContext(app)
 
 	// Set defaults for certain modules.
-	app.OracleKeeper.SetPrice(ctx, asset.Registry.Pair(denoms.BTC, denoms.NUSD), sdk.NewDec(20000))
-	app.OracleKeeper.SetPrice(ctx, "xxx:yyy", sdk.NewDec(20000))
-	app.SudoKeeper.Sudoers.Set(ctx, DefaultSudoers())
+	// app.OracleKeeper.SetPrice(ctx, asset.Registry.Pair(denoms.BTC, denoms.NUSD), math.LegacyNewDec(20000))
+	// app.OracleKeeper.SetPrice(ctx, "xxx:yyy", math.LegacyNewDec(20000))
+	// app.SudoKeeper.Sudoers.Set(ctx, DefaultSudoers())
 
 	return app, ctx
 }
 
 // NewContext: Returns a fresh sdk.Context corresponding to the given NibiruApp.
 func NewContext(nibiru *app.NibiruApp) sdk.Context {
-	return nibiru.NewContext(false, tmproto.Header{
-		Height: 1,
-		Time:   time.Now().UTC(),
-	})
+	return nibiru.NewContext(false)
 }
 
 // DefaultSudoers: State for the x/sudo module for the default test app.
-func DefaultSudoers() sudotypes.Sudoers {
-	addr := DefaultSudoRoot().String()
-	return sudotypes.Sudoers{
-		Root:      addr,
-		Contracts: []string{addr},
-	}
-}
+// func DefaultSudoers() sudotypes.Sudoers {
+// 	addr := DefaultSudoRoot().String()
+// 	return sudotypes.Sudoers{
+// 		Root:      addr,
+// 		Contracts: []string{addr},
+// 	}
+// }
 
 func DefaultSudoRoot() sdk.AccAddress {
 	return sdk.MustAccAddressFromBech32(testutil.ADDR_SUDO_ROOT)
@@ -82,13 +80,13 @@ func DefaultSudoRoot() sdk.AccAddress {
 // SetDefaultSudoGenesis: Sets the sudo module genesis state to a valid
 // default. See "DefaultSudoers".
 func SetDefaultSudoGenesis(gen app.GenesisState) {
-	sudoGen := new(sudotypes.GenesisState)
-	encoding := app.MakeEncodingConfig()
-	encoding.Marshaler.MustUnmarshalJSON(gen[sudotypes.ModuleName], sudoGen)
-	if err := sudoGen.Validate(); err != nil {
-		sudoGen.Sudoers = DefaultSudoers()
-		gen[sudotypes.ModuleName] = encoding.Marshaler.MustMarshalJSON(sudoGen)
-	}
+	// sudoGen := new(sudotypes.GenesisState)
+	// encoding := app.MakeEncodingConfig()
+	// encoding.Codec.MustUnmarshalJSON(gen[sudotypes.ModuleName], sudoGen)
+	// if err := sudoGen.Validate(); err != nil {
+	// 	sudoGen.Sudoers = DefaultSudoers()
+	// 	gen[sudotypes.ModuleName] = encoding.Codec.MustMarshalJSON(sudoGen)
+	// }
 }
 
 // NewNibiruTestAppAndZeroTimeCtx: Runs NewNibiruTestAppAndZeroTimeCtx with the
@@ -109,7 +107,7 @@ func NewNibiruTestApp(gen app.GenesisState, baseAppOptions ...func(*baseapp.Base
 	encoding := app.MakeEncodingConfig()
 	SetDefaultSudoGenesis(gen)
 
-	app := app.NewNibiruApp(
+	application := app.NewNibiruApp(
 		logger,
 		db,
 		/*traceStore=*/ nil,
@@ -119,7 +117,7 @@ func NewNibiruTestApp(gen app.GenesisState, baseAppOptions ...func(*baseapp.Base
 		baseAppOptions...,
 	)
 
-	gen, err := GenesisStateWithSingleValidator(encoding.Marshaler, gen)
+	gen, err := GenesisStateWithSingleValidator(encoding.Codec, gen)
 	if err != nil {
 		panic(err)
 	}
@@ -129,12 +127,12 @@ func NewNibiruTestApp(gen app.GenesisState, baseAppOptions ...func(*baseapp.Base
 		panic(err)
 	}
 
-	app.InitChain(abci.RequestInitChain{
+	application.InitChain(&abci.RequestInitChain{
 		ConsensusParams: sims.DefaultConsensusParams,
 		AppStateBytes:   stateBytes,
 	})
 
-	return app
+	return application
 }
 
 // FundAccount is a utility function that funds an account by minting and
@@ -144,11 +142,11 @@ func FundAccount(
 	bankKeeper bankkeeper.Keeper, ctx sdk.Context, addr sdk.AccAddress,
 	amounts sdk.Coins,
 ) error {
-	if err := bankKeeper.MintCoins(ctx, inflationtypes.ModuleName, amounts); err != nil {
+	if err := bankKeeper.MintCoins(ctx, ibctransfertypes.ModuleName, amounts); err != nil {
 		return err
 	}
 
-	return bankKeeper.SendCoinsFromModuleToAccount(ctx, inflationtypes.ModuleName, addr, amounts)
+	return bankKeeper.SendCoinsFromModuleToAccount(ctx, ibctransfertypes.ModuleName, addr, amounts)
 }
 
 // FundModuleAccount is a utility function that funds a module account by
@@ -158,11 +156,12 @@ func FundModuleAccount(
 	bankKeeper bankkeeper.Keeper, ctx sdk.Context,
 	recipientMod string, amounts sdk.Coins,
 ) error {
-	if err := bankKeeper.MintCoins(ctx, inflationtypes.ModuleName, amounts); err != nil {
-		return err
-	}
+	// if err := bankKeeper.MintCoins(ctx, inflationtypes.ModuleName, amounts); err != nil {
+	// 	return err
+	// }
 
-	return bankKeeper.SendCoinsFromModuleToModule(ctx, inflationtypes.ModuleName, recipientMod, amounts)
+	// return bankKeeper.SendCoinsFromModuleToModule(ctx, inflationtypes.ModuleName, recipientMod, amounts)
+	return nil
 }
 
 // EnsureNibiruPrefix sets the account address prefix to Nibiru's rather than
@@ -170,7 +169,7 @@ func FundModuleAccount(
 // addresses rather than cosmos ones (for Gaia).
 func EnsureNibiruPrefix() {
 	csdkConfig := sdk.GetConfig()
-	nibiruPrefix := app.AccountAddressPrefix
+	nibiruPrefix := appconst.AccountAddressPrefix
 	if csdkConfig.GetBech32AccountAddrPrefix() != nibiruPrefix {
 		app.SetPrefixes(nibiruPrefix)
 	}

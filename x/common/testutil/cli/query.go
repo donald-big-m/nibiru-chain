@@ -4,20 +4,18 @@ import (
 	"fmt"
 
 	"github.com/cosmos/cosmos-sdk/x/auth/client/cli"
+	"github.com/cosmos/gogoproto/proto"
 
 	"github.com/cosmos/cosmos-sdk/client"
-	"github.com/cosmos/cosmos-sdk/codec"
 	clitestutil "github.com/cosmos/cosmos-sdk/testutil/cli"
 
 	tmcli "github.com/cometbft/cometbft/libs/cli"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/spf13/cobra"
-
-	"github.com/NibiruChain/nibiru/x/common/asset"
-	oraclecli "github.com/NibiruChain/nibiru/x/oracle/client/cli"
-	oracletypes "github.com/NibiruChain/nibiru/x/oracle/types"
-	sudocli "github.com/NibiruChain/nibiru/x/sudo/cli"
-	sudotypes "github.com/NibiruChain/nibiru/x/sudo/types"
+	// oraclecli "github.com/NibiruChain/nibiru/x/oracle/client/cli"
+	// oracletypes "github.com/NibiruChain/nibiru/x/oracle/types"
+	// sudocli "github.com/NibiruChain/nibiru/x/sudo/cli"
+	// sudotypes "github.com/NibiruChain/nibiru/x/sudo/types"
 )
 
 // ExecQueryOption defines a type which customizes a CLI query operation.
@@ -48,7 +46,7 @@ func WithQueryEncodingType(e EncodingType) ExecQueryOption {
 func (chain Network) ExecQuery(
 	cmd *cobra.Command,
 	args []string,
-	result codec.ProtoMarshaler,
+	result proto.Message,
 	opts ...ExecQueryOption,
 ) error {
 	return ExecQuery(chain.Validators[0].ClientCtx, cmd, args, result, opts...)
@@ -59,7 +57,7 @@ func ExecQuery(
 	clientCtx client.Context,
 	cmd *cobra.Command,
 	args []string,
-	result codec.ProtoMarshaler,
+	result proto.Message,
 	opts ...ExecQueryOption,
 ) error {
 	var options queryOptions
@@ -90,13 +88,13 @@ func ExecQuery(
 	}
 }
 
-func QueryOracleExchangeRate(clientCtx client.Context, pair asset.Pair) (*oracletypes.QueryExchangeRateResponse, error) {
-	var queryResp oracletypes.QueryExchangeRateResponse
-	if err := ExecQuery(clientCtx, oraclecli.GetCmdQueryExchangeRates(), []string{pair.String()}, &queryResp); err != nil {
-		return nil, err
-	}
-	return &queryResp, nil
-}
+// func QueryOracleExchangeRate(clientCtx client.Context, pair asset.Pair) (*oracletypes.QueryExchangeRateResponse, error) {
+// 	var queryResp oracletypes.QueryExchangeRateResponse
+// 	if err := ExecQuery(clientCtx, oraclecli.GetCmdQueryExchangeRates(), []string{pair.String()}, &queryResp); err != nil {
+// 		return nil, err
+// 	}
+// 	return &queryResp, nil
+// }
 
 func QueryTx(ctx client.Context, txHash string) (*sdk.TxResponse, error) {
 	var queryResp sdk.TxResponse
@@ -114,15 +112,15 @@ func QueryTx(ctx client.Context, txHash string) (*sdk.TxResponse, error) {
 	return &queryResp, nil
 }
 
-func QuerySudoers(clientCtx client.Context) (*sudotypes.QuerySudoersResponse, error) {
-	var queryResp sudotypes.QuerySudoersResponse
-	if err := ExecQuery(
-		clientCtx,
-		sudocli.CmdQuerySudoers(),
-		[]string{},
-		&queryResp,
-	); err != nil {
-		return nil, err
-	}
-	return &queryResp, nil
-}
+// func QuerySudoers(clientCtx client.Context) (*sudotypes.QuerySudoersResponse, error) {
+// 	var queryResp sudotypes.QuerySudoersResponse
+// 	if err := ExecQuery(
+// 		clientCtx,
+// 		sudocli.CmdQuerySudoers(),
+// 		[]string{},
+// 		&queryResp,
+// 	); err != nil {
+// 		return nil, err
+// 	}
+// 	return &queryResp, nil
+// }

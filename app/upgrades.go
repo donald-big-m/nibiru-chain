@@ -3,16 +3,18 @@ package app
 import (
 	"fmt"
 
-	upgradetypes "github.com/cosmos/cosmos-sdk/x/upgrade/types"
+	upgradetypes "cosmossdk.io/x/upgrade/types"
 
 	"github.com/NibiruChain/nibiru/app/upgrades"
 	"github.com/NibiruChain/nibiru/app/upgrades/v1_1_0"
 	"github.com/NibiruChain/nibiru/app/upgrades/v1_2_0"
+	"github.com/NibiruChain/nibiru/app/upgrades/v1_3_0"
 )
 
 var Upgrades = []upgrades.Upgrade{
 	v1_1_0.Upgrade,
 	v1_2_0.Upgrade,
+	v1_3_0.Upgrade,
 }
 
 func (app *NibiruApp) setupUpgrades() {

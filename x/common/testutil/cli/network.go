@@ -9,18 +9,26 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+
 	"sync"
+	"syscall"
 	"time"
 
-	"github.com/cometbft/cometbft/libs/log"
-	"github.com/cosmos/cosmos-sdk/store/pruning/types"
+	"cosmossdk.io/log"
+	"cosmossdk.io/store/pruning/types"
+	"github.com/cosmos/cosmos-sdk/codec"
+	"github.com/cosmos/cosmos-sdk/codec/testutil"
+	net "github.com/cosmos/cosmos-sdk/testutil/network"
 	"github.com/cosmos/cosmos-sdk/testutil/sims"
+	authtx "github.com/cosmos/cosmos-sdk/x/auth/tx"
+	"golang.org/x/sync/errgroup"
 
-	dbm "github.com/cometbft/cometbft-db"
+	"cosmossdk.io/math"
+	dbm "github.com/cosmos/cosmos-db"
 	"github.com/cosmos/cosmos-sdk/baseapp"
-
 	sdktestutil "github.com/cosmos/cosmos-sdk/testutil"
 
 	tmrand "github.com/cometbft/cometbft/libs/rand"
@@ -131,6 +139,8 @@ type (
 		grpc           *grpc.Server
 		grpcWeb        *http.Server
 		secretMnemonic string
+		errGroup       *errgroup.Group
+		cancelFn       context.CancelFunc
 	}
 )
 
@@ -157,7 +167,7 @@ func BuildNetworkConfig(appGenesis app.GenesisState) Config {
 
 	chainID := "chain-" + tmrand.NewRand().Str(6)
 	return Config{
-		Codec:             encCfg.Marshaler,
+		Codec:             encCfg.Codec,
 		TxConfig:          encCfg.TxConfig,
 		LegacyAmino:       encCfg.Amino,
 		InterfaceRegistry: encCfg.InterfaceRegistry,
@@ -236,7 +246,7 @@ func New(logger Logger, baseDir string, cfg Config) (*Network, error) {
 				apiListenAddr = cfg.APIAddress
 			} else {
 				var err error
-				apiListenAddr, _, err = server.FreeTCPAddr()
+				apiListenAddr, _, _, err = net.FreeTCPAddr()
 				if err != nil {
 					return nil, err
 				}
@@ -252,7 +262,7 @@ func New(logger Logger, baseDir string, cfg Config) (*Network, error) {
 			if cfg.RPCAddress != "" {
 				tmCfg.RPC.ListenAddress = cfg.RPCAddress
 			} else {
-				rpcAddr, _, err := server.FreeTCPAddr()
+				rpcAddr, _, _, err := net.FreeTCPAddr()
 				if err != nil {
 					return nil, err
 				}
@@ -262,7 +272,7 @@ func New(logger Logger, baseDir string, cfg Config) (*Network, error) {
 			if cfg.GRPCAddress != "" {
 				appCfg.GRPC.Address = cfg.GRPCAddress
 			} else {
-				_, grpcPort, err := server.FreeTCPAddr()
+				_, grpcPort, _, err := net.FreeTCPAddr()
 				if err != nil {
 					return nil, err
 				}
@@ -270,17 +280,13 @@ func New(logger Logger, baseDir string, cfg Config) (*Network, error) {
 			}
 			appCfg.GRPC.Enable = true
 
-			_, grpcWebPort, err := server.FreeTCPAddr()
-			if err != nil {
-				return nil, err
-			}
-			appCfg.GRPCWeb.Address = fmt.Sprintf("0.0.0.0:%s", grpcWebPort)
+			// GRPCWeb now uses the same address than
 			appCfg.GRPCWeb.Enable = true
 		}
 
 		loggerNoOp := log.NewNopLogger()
 		if cfg.EnableTMLogging {
-			loggerNoOp = log.NewTMLogger(log.NewSyncWriter(os.Stdout))
+			loggerNoOp = log.NewLogger(os.Stdout)
 		}
 
 		ctx.Logger = loggerNoOp
@@ -304,13 +310,13 @@ func New(logger Logger, baseDir string, cfg Config) (*Network, error) {
 		tmCfg.Moniker = nodeDirName
 		monikers[i] = nodeDirName
 
-		proxyAddr, _, err := server.FreeTCPAddr()
+		proxyAddr, _, _, err := net.FreeTCPAddr()
 		if err != nil {
 			return nil, err
 		}
 		tmCfg.ProxyApp = proxyAddr
 
-		p2pAddr, _, err := server.FreeTCPAddr()
+		p2pAddr, _, _, err := net.FreeTCPAddr()
 		if err != nil {
 			return nil, err
 		}
@@ -371,18 +377,28 @@ func New(logger Logger, baseDir string, cfg Config) (*Network, error) {
 		genBalances = append(genBalances, banktypes.Balance{Address: addr.String(), Coins: balances.Sort()})
 		genAccounts = append(genAccounts, authtypes.NewBaseAccount(addr, nil, 0, 0))
 
-		commission, err := sdk.NewDecFromStr("0.05")
+		commission, err := math.LegacyNewDecFromStr("0.05")
+		if err != nil {
+			return nil, err
+		}
+
+		interfaceRegistry := testutil.CodecOptions{}.NewInterfaceRegistry()
+		cdc := codec.NewProtoCodec(interfaceRegistry)
+		txConfig := authtx.NewTxConfig(cdc, authtx.DefaultSignModes)
+
+		valAddrCodec := txConfig.SigningContext().ValidatorAddressCodec()
+		valStr, err := valAddrCodec.BytesToString(sdk.ValAddress(addr))
 		if err != nil {
 			return nil, err
 		}
 
 		createValMsg, err := stakingtypes.NewMsgCreateValidator(
-			sdk.ValAddress(addr),
+			valStr,
 			valPubKeys[i],
 			sdk.NewCoin(cfg.BondDenom, cfg.BondedTokens),
 			stakingtypes.NewDescription(nodeDirName, "", "", "", ""),
-			stakingtypes.NewCommissionRates(commission, sdk.OneDec(), sdk.OneDec()),
-			sdk.OneInt(),
+			stakingtypes.NewCommissionRates(commission, math.LegacyOneDec(), math.LegacyOneDec()),
+			math.OneInt(),
 		)
 		if err != nil {
 			return nil, err
@@ -394,7 +410,7 @@ func New(logger Logger, baseDir string, cfg Config) (*Network, error) {
 		}
 
 		memo := fmt.Sprintf("%s@%s:%s", nodeIDs[i], p2pURL.Hostname(), p2pURL.Port())
-		fee := sdk.NewCoins(sdk.NewCoin(fmt.Sprintf("%stoken", nodeDirName), sdk.ZeroInt()))
+		fee := sdk.NewCoins(sdk.NewCoin(fmt.Sprintf("%stoken", nodeDirName), math.ZeroInt()))
 		txBuilder := cfg.TxConfig.NewTxBuilder()
 		err = txBuilder.SetMsgs(createValMsg)
 		if err != nil {
@@ -411,7 +427,7 @@ func New(logger Logger, baseDir string, cfg Config) (*Network, error) {
 			WithKeybase(kb).
 			WithTxConfig(cfg.TxConfig)
 
-		err = tx.Sign(txFactory, nodeDirName, txBuilder, true)
+		err = tx.Sign(nil, txFactory, nodeDirName, txBuilder, true)
 		if err != nil {
 			return nil, err
 		}
@@ -482,7 +498,7 @@ func New(logger Logger, baseDir string, cfg Config) (*Network, error) {
 
 	// Ensure we cleanup incase any test was abruptly halted (e.g. SIGINT) as
 	// any defer in a test would not be called.
-	server.TrapSignal(network.Cleanup)
+	trapSignal(network.Cleanup)
 
 	return network, err
 }
@@ -687,4 +703,28 @@ func (n *Network) keyBaseAndInfoForAddr(addr sdk.AccAddress) (keyring.Keyring, *
 	}
 
 	return nil, nil, fmt.Errorf("address not found in any of the known validators keyrings: %s", addr.String())
+}
+
+// trapSignal traps SIGINT and SIGTERM and calls os.Exit once a signal is received.
+func trapSignal(cleanupFunc func()) {
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+
+	go func() {
+		sig := <-sigs
+
+		if cleanupFunc != nil {
+			cleanupFunc()
+		}
+		exitCode := 128
+
+		switch sig {
+		case syscall.SIGINT:
+			exitCode += int(syscall.SIGINT)
+		case syscall.SIGTERM:
+			exitCode += int(syscall.SIGTERM)
+		}
+
+		os.Exit(exitCode)
+	}()
 }

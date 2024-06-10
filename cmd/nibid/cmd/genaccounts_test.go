@@ -7,7 +7,7 @@ import (
 
 	"github.com/NibiruChain/nibiru/app"
 
-	"github.com/cometbft/cometbft/libs/log"
+	"cosmossdk.io/log"
 	"github.com/cosmos/cosmos-sdk/client"
 	"github.com/cosmos/cosmos-sdk/client/flags"
 	"github.com/cosmos/cosmos-sdk/server"
@@ -38,10 +38,10 @@ func TestAddGenesisAccountCmd(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			home := t.TempDir()
 			logger := log.NewNopLogger()
-			cfg, err := genutiltest.CreateDefaultTendermintConfig(home)
+			cfg, err := genutiltest.CreateDefaultCometConfig(home)
 			require.NoError(t, err)
 
-			appCodec := app.MakeEncodingConfig().Marshaler
+			appCodec := app.MakeEncodingConfig().Codec
 			err = genutiltest.ExecInitCmd(
 				testModuleBasicManager, home, appCodec)
 			require.NoError(t, err)
