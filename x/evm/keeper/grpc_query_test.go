@@ -29,7 +29,8 @@ type TestCase[In, Out any] struct {
 		req In,
 		wantResp Out,
 	)
-	wantErr string
+	onTestEnd func(deps *evmtest.TestDeps)
+	wantErr   string
 }
 
 func InvalidEthAddr() string { return "0x0000" }
@@ -67,18 +68,70 @@ func TraceERC20Transfer() string {
 		  }`
 }
 
-func (s *Suite) TestQueryNibiruAccount() {
-	type In = *evm.QueryNibiruAccountRequest
-	type Out = *evm.QueryNibiruAccountResponse
+func (s *Suite) TestQueryEvmAccount() {
+	type In = *evm.QueryEthAccountRequest
+	type Out = *evm.QueryEthAccountResponse
 	testCases := []TestCase[In, Out]{
+		{
+			name: "happy: fund account + query eth addr",
+			setup: func(deps *evmtest.TestDeps) {
+				// fund account with 420 tokens
+				ethAddr := deps.Sender.EthAddr
+				coins := sdk.Coins{sdk.NewInt64Coin(evm.DefaultEVMDenom, 420)}
+				err := testapp.FundAccount(deps.Chain.BankKeeper, deps.Ctx, ethAddr.Bytes(), coins)
+				s.Require().NoError(err)
+			},
+			scenario: func(deps *evmtest.TestDeps) (req In, wantResp Out) {
+				req = &evm.QueryEthAccountRequest{
+					Address: deps.Sender.EthAddr.Hex(),
+				}
+				wantResp = &evm.QueryEthAccountResponse{
+					Balance:       "420",
+					BalanceWei:    "420" + strings.Repeat("0", 12),
+					CodeHash:      gethcommon.BytesToHash(evm.EmptyCodeHash).Hex(),
+					Nonce:         0,
+					EthAddress:    deps.Sender.EthAddr.String(),
+					Bech32Address: deps.Sender.NibiruAddr.String(),
+				}
+				return req, wantResp
+			},
+			wantErr: "",
+		},
+		{
+			name: "happy: fund account + query nibiru bech32 addr",
+			setup: func(deps *evmtest.TestDeps) {
+				// fund account with 420 tokens
+				ethAddr := deps.Sender.EthAddr
+				coins := sdk.Coins{sdk.NewInt64Coin(evm.DefaultEVMDenom, 420)}
+				err := testapp.FundAccount(deps.Chain.BankKeeper, deps.Ctx, ethAddr.Bytes(), coins)
+				s.Require().NoError(err)
+			},
+			scenario: func(deps *evmtest.TestDeps) (req In, wantResp Out) {
+				req = &evm.QueryEthAccountRequest{
+					Address: deps.Sender.NibiruAddr.String(),
+				}
+				wantResp = &evm.QueryEthAccountResponse{
+					Balance:       "420",
+					BalanceWei:    "420" + strings.Repeat("0", 12),
+					CodeHash:      gethcommon.BytesToHash(evm.EmptyCodeHash).Hex(),
+					Nonce:         0,
+					EthAddress:    deps.Sender.EthAddr.String(),
+					Bech32Address: deps.Sender.NibiruAddr.String(),
+				}
+				return req, wantResp
+			},
+			wantErr: "",
+		},
 		{
 			name: "sad: msg validation",
 			scenario: func(deps *evmtest.TestDeps) (req In, wantResp Out) {
-				req = &evm.QueryNibiruAccountRequest{
+				req = &evm.QueryEthAccountRequest{
 					Address: InvalidEthAddr(),
 				}
-				wantResp = &evm.QueryNibiruAccountResponse{
-					Address: sdk.AccAddress(gethcommon.Address{}.Bytes()).String(),
+				wantResp = &evm.QueryEthAccountResponse{
+					BalanceWei: "0",
+					CodeHash:   gethcommon.BytesToHash(evm.EmptyCodeHash).Hex(),
+					Nonce:      0,
 				}
 				return req, wantResp
 			},
@@ -88,97 +141,16 @@ func (s *Suite) TestQueryNibiruAccount() {
 			name: "happy: not existing account",
 			scenario: func(deps *evmtest.TestDeps) (req In, wantResp Out) {
 				ethAcc := evmtest.NewEthAccInfo()
-				req = &evm.QueryNibiruAccountRequest{
+				req = &evm.QueryEthAccountRequest{
 					Address: ethAcc.EthAddr.String(),
 				}
-				wantResp = &evm.QueryNibiruAccountResponse{
-					Address:       ethAcc.NibiruAddr.String(),
-					Sequence:      0,
-					AccountNumber: 0,
-				}
-				return req, wantResp
-			},
-			wantErr: "",
-		},
-		{
-			name: "happy: existing account",
-			scenario: func(deps *evmtest.TestDeps) (req In, wantResp Out) {
-				ethAcc := evmtest.NewEthAccInfo()
-				accountKeeper := deps.Chain.AccountKeeper
-				account := accountKeeper.NewAccountWithAddress(deps.Ctx, ethAcc.NibiruAddr)
-				accountKeeper.SetAccount(deps.Ctx, account)
-
-				req = &evm.QueryNibiruAccountRequest{
-					Address: ethAcc.EthAddr.String(),
-				}
-				wantResp = &evm.QueryNibiruAccountResponse{
-					Address:       ethAcc.NibiruAddr.String(),
-					Sequence:      account.GetSequence(),
-					AccountNumber: account.GetAccountNumber(),
-				}
-				return req, wantResp
-			},
-			wantErr: "",
-		},
-	}
-
-	for _, tc := range testCases {
-		s.Run(tc.name, func() {
-			deps := evmtest.NewTestDeps()
-			req, wantResp := tc.scenario(&deps)
-			goCtx := sdk.WrapSDKContext(deps.Ctx)
-			gotResp, err := deps.K.NibiruAccount(goCtx, req)
-			if tc.wantErr != "" {
-				s.Require().ErrorContains(err, tc.wantErr)
-				return
-			}
-			s.Assert().NoError(err)
-			s.EqualValues(wantResp, gotResp)
-		})
-	}
-}
-
-func (s *Suite) TestQueryEthAccount() {
-	type In = *evm.QueryEthAccountRequest
-	type Out = *evm.QueryEthAccountResponse
-	testCases := []TestCase[In, Out]{
-		{
-			name: "sad: msg validation",
-			scenario: func(deps *evmtest.TestDeps) (req In, wantResp Out) {
-				req = &evm.QueryEthAccountRequest{
-					Address: InvalidEthAddr(),
-				}
 				wantResp = &evm.QueryEthAccountResponse{
-					Balance:  "0",
-					CodeHash: gethcommon.BytesToHash(evm.EmptyCodeHash).Hex(),
-					Nonce:    0,
-				}
-				return req, wantResp
-			},
-			wantErr: "not a valid ethereum hex addr",
-		},
-		{
-			name: "happy: fund account + query",
-			setup: func(deps *evmtest.TestDeps) {
-				chain := deps.Chain
-				ethAddr := deps.Sender.EthAddr
-
-				// fund account with 420 tokens
-				coins := sdk.Coins{sdk.NewInt64Coin(evm.DefaultEVMDenom, 420)}
-				err := chain.BankKeeper.MintCoins(deps.Ctx, evm.ModuleName, coins)
-				s.NoError(err)
-				err = chain.BankKeeper.SendCoinsFromModuleToAccount(
-					deps.Ctx, evm.ModuleName, ethAddr.Bytes(), coins)
-				s.Require().NoError(err)
-			},
-			scenario: func(deps *evmtest.TestDeps) (req In, wantResp Out) {
-				req = &evm.QueryEthAccountRequest{
-					Address: deps.Sender.EthAddr.Hex(),
-				}
-				wantResp = &evm.QueryEthAccountResponse{
-					Balance:  "420",
-					CodeHash: gethcommon.BytesToHash(evm.EmptyCodeHash).Hex(),
-					Nonce:    0,
+					Balance:       "0",
+					BalanceWei:    "0",
+					CodeHash:      gethcommon.BytesToHash(evm.EmptyCodeHash).Hex(),
+					Nonce:         0,
+					EthAddress:    ethAcc.EthAddr.String(),
+					Bech32Address: ethAcc.NibiruAddr.String(),
 				}
 				return req, wantResp
 			},
@@ -543,7 +515,7 @@ func (s *Suite) TestQueryBalance() {
 					Address: InvalidEthAddr(),
 				}
 				wantResp = &evm.QueryBalanceResponse{
-					Balance: "0",
+					BalanceWei: "0",
 				}
 				return req, wantResp
 			},
@@ -556,7 +528,8 @@ func (s *Suite) TestQueryBalance() {
 					Address: evmtest.NewEthAccInfo().EthAddr.String(),
 				}
 				wantResp = &evm.QueryBalanceResponse{
-					Balance: "0",
+					Balance:    "0",
+					BalanceWei: "0",
 				}
 				return req, wantResp
 			},
@@ -581,7 +554,8 @@ func (s *Suite) TestQueryBalance() {
 					Address: deps.Sender.EthAddr.Hex(),
 				}
 				wantResp = &evm.QueryBalanceResponse{
-					Balance: "420",
+					Balance:    "420",
+					BalanceWei: "420" + strings.Repeat("0", 12),
 				}
 				return req, wantResp
 			},
@@ -681,7 +655,8 @@ func (s *Suite) TestEstimateGasForEvmCallType() {
 		},
 		{
 			name: "happy: estimate gas for transfer",
-			setup: func(deps *evmtest.TestDeps) {
+			scenario: func(deps *evmtest.TestDeps) (req In, wantResp Out) {
+				// fund the account
 				chain := deps.Chain
 				ethAddr := deps.Sender.EthAddr
 				coins := sdk.Coins{sdk.NewInt64Coin(evm.DefaultEVMDenom, 1000)}
@@ -690,10 +665,17 @@ func (s *Suite) TestEstimateGasForEvmCallType() {
 				err = chain.BankKeeper.SendCoinsFromModuleToAccount(
 					deps.Ctx, evm.ModuleName, ethAddr.Bytes(), coins)
 				s.Require().NoError(err)
-			},
-			scenario: func(deps *evmtest.TestDeps) (req In, wantResp Out) {
+
+				// assert balance of 1000 * 10^12 wei
+				resp, _ := deps.Chain.EvmKeeper.Balance(deps.GoCtx(), &evm.QueryBalanceRequest{
+					Address: deps.Sender.EthAddr.Hex(),
+				})
+				s.Equal("1000", resp.Balance)
+				s.Require().Equal("1000"+strings.Repeat("0", 12), resp.BalanceWei)
+
+				// Send Eth call to transfer from the account - 5 * 10^12 wei
 				recipient := evmtest.NewEthAccInfo().EthAddr
-				amountToSend := hexutil.Big(*big.NewInt(10))
+				amountToSend := hexutil.Big(*evm.NativeToWei(big.NewInt(5)))
 				gasLimitArg := hexutil.Uint64(100000)
 
 				jsonTxArgs, err := json.Marshal(&evm.JsonTxArgs{
@@ -713,12 +695,14 @@ func (s *Suite) TestEstimateGasForEvmCallType() {
 				return req, wantResp
 			},
 			wantErr: "",
+			onTestEnd: func(deps *evmtest.TestDeps) {
+			},
 		},
 		{
 			name: "sad: insufficient balance for transfer",
 			scenario: func(deps *evmtest.TestDeps) (req In, wantResp Out) {
 				recipient := evmtest.NewEthAccInfo().EthAddr
-				amountToSend := hexutil.Big(*big.NewInt(10))
+				amountToSend := hexutil.Big(*evm.NativeToWei(big.NewInt(10)))
 
 				jsonTxArgs, err := json.Marshal(&evm.JsonTxArgs{
 					From:  &deps.Sender.EthAddr,
@@ -752,6 +736,10 @@ func (s *Suite) TestEstimateGasForEvmCallType() {
 			}
 			s.Assert().NoError(err)
 			s.EqualValues(wantResp, gotResp)
+
+			if tc.onTestEnd != nil {
+				tc.onTestEnd(&deps)
+			}
 		})
 	}
 }
@@ -781,9 +769,8 @@ func (s *Suite) TestTraceTx() {
 			wantErr: "",
 		},
 		{
-			"happy: trace erc-20 transfer tx",
-			nil,
-			func(deps *evmtest.TestDeps) (req In, wantResp Out) {
+			name: "happy: trace erc-20 transfer tx",
+			scenario: func(deps *evmtest.TestDeps) (req In, wantResp Out) {
 				txMsg, predecessors := evmtest.DeployAndExecuteERC20Transfer(deps, s.T())
 
 				req = &evm.QueryTraceTxRequest{
@@ -793,7 +780,7 @@ func (s *Suite) TestTraceTx() {
 				wantResp = TraceERC20Transfer()
 				return req, wantResp
 			},
-			"",
+			wantErr: "",
 		},
 	}
 
